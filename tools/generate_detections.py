@@ -1,213 +1,321 @@
-# vim: expandtab:ts=4:sw=4
-import os
-import errno
-import argparse
-import numpy as np
-import cv2
-import tensorflow as tf
-
-
-def _run_in_batches(f, data_dict, out, batch_size):
-    data_len = len(out)
-    num_batches = int(data_len / batch_size)
-
-    s, e = 0, 0
-    for i in range(num_batches):
-        s, e = i * batch_size, (i + 1) * batch_size
-        batch_data_dict = {k: v[s:e] for k, v in data_dict.items()}
-        out[s:e] = f(batch_data_dict)
-    if e < len(out):
-        batch_data_dict = {k: v[e:] for k, v in data_dict.items()}
-        out[e:] = f(batch_data_dict)
-
-
-def extract_image_patch(image, bbox, patch_shape):
-    """Extract image patch from bounding box.
-
-    Parameters
-    ----------
-    image : ndarray
-        The full image.
-    bbox : array_like
-        The bounding box in format (x, y, width, height).
-    patch_shape : Optional[array_like]
-        This parameter can be used to enforce a desired patch shape
-        (height, width). First, the `bbox` is adapted to the aspect ratio
-        of the patch shape, then it is clipped at the image boundaries.
-        If None, the shape is computed from :arg:`bbox`.
-
-    Returns
-    -------
-    ndarray | NoneType
-        An image patch showing the :arg:`bbox`, optionally reshaped to
-        :arg:`patch_shape`.
-        Returns None if the bounding box is empty or fully outside of the image
-        boundaries.
-
-    """
-    bbox = np.array(bbox)
-    if patch_shape is not None:
-        # correct aspect ratio to patch shape
-        target_aspect = float(patch_shape[1]) / patch_shape[0]
-        new_width = target_aspect * bbox[3]
-        bbox[0] -= (new_width - bbox[2]) / 2
-        bbox[2] = new_width
-
-    # convert to top left, bottom right
-    bbox[2:] += bbox[:2]
-    bbox = bbox.astype(np.int)
-
-    # clip at image boundaries
-    bbox[:2] = np.maximum(0, bbox[:2])
-    bbox[2:] = np.minimum(np.asarray(image.shape[:2][::-1]) - 1, bbox[2:])
-    if np.any(bbox[:2] >= bbox[2:]):
-        return None
-    sx, sy, ex, ey = bbox
-    image = image[sy:ey, sx:ex]
-    image = cv2.resize(image, tuple(patch_shape[::-1]))
-    return image
-
-
-class ImageEncoder(object):
-
-    def __init__(self, checkpoint_filename, input_name="images",
-                 output_name="features"):
-        self.session = tf.Session()
-        with tf.gfile.GFile(checkpoint_filename, "rb") as file_handle:
-            graph_def = tf.GraphDef()
-            graph_def.ParseFromString(file_handle.read())
-        tf.import_graph_def(graph_def, name="net")
-        self.input_var = tf.get_default_graph().get_tensor_by_name(
-            "net/%s:0" % input_name)
-        self.output_var = tf.get_default_graph().get_tensor_by_name(
-            "net/%s:0" % output_name)
-
-        assert len(self.output_var.get_shape()) == 2
-        assert len(self.input_var.get_shape()) == 4
-        self.feature_dim = self.output_var.get_shape().as_list()[-1]
-        self.image_shape = self.input_var.get_shape().as_list()[1:]
-
-    def __call__(self, data_x, batch_size=32):
-        out = np.zeros((len(data_x), self.feature_dim), np.float32)
-        _run_in_batches(
-            lambda x: self.session.run(self.output_var, feed_dict=x),
-            {self.input_var: data_x}, out, batch_size)
-        return out
-
-
-def create_box_encoder(model_filename, input_name="images",
-                       output_name="features", batch_size=32):
-    image_encoder = ImageEncoder(model_filename, input_name, output_name)
-    image_shape = image_encoder.image_shape
-
-    def encoder(image, boxes):
-        image_patches = []
-        for box in boxes:
-            patch = extract_image_patch(image, box, image_shape[:2])
-            if patch is None:
-                print("WARNING: Failed to extract image patch: %s." % str(box))
-                patch = np.random.uniform(
-                    0., 255., image_shape).astype(np.uint8)
-            image_patches.append(patch)
-        image_patches = np.asarray(image_patches)
-        return image_encoder(image_patches, batch_size)
-
-    return encoder
-
-
-def generate_detections(encoder, mot_dir, output_dir, detection_dir=None):
-    """Generate detections with features.
-
-    Parameters
-    ----------
-    encoder : Callable[image, ndarray] -> ndarray
-        The encoder function takes as input a BGR color image and a matrix of
-        bounding boxes in format `(x, y, w, h)` and returns a matrix of
-        corresponding feature vectors.
-    mot_dir : str
-        Path to the MOTChallenge directory (can be either train or test).
-    output_dir
-        Path to the output directory. Will be created if it does not exist.
-    detection_dir
-        Path to custom detections. The directory structure should be the default
-        MOTChallenge structure: `[sequence]/det/det.txt`. If None, uses the
-        standard MOTChallenge detections.
-
-    """
-    if detection_dir is None:
-        detection_dir = mot_dir
-    try:
-        os.makedirs(output_dir)
-    except OSError as exception:
-        if exception.errno == errno.EEXIST and os.path.isdir(output_dir):
-            pass
-        else:
-            raise ValueError(
-                "Failed to created output directory '%s'" % output_dir)
-
-    for sequence in os.listdir(mot_dir):
-        print("Processing %s" % sequence)
-        sequence_dir = os.path.join(mot_dir, sequence)
-
-        image_dir = os.path.join(sequence_dir, "img1")
-        image_filenames = {
-            int(os.path.splitext(f)[0]): os.path.join(image_dir, f)
-            for f in os.listdir(image_dir)}
-
-        detection_file = os.path.join(
-            detection_dir, sequence, "det/det.txt")
-        detections_in = np.loadtxt(detection_file, delimiter=',')
-        detections_out = []
-
-        frame_indices = detections_in[:, 0].astype(np.int)
-        min_frame_idx = frame_indices.astype(np.int).min()
-        max_frame_idx = frame_indices.astype(np.int).max()
-        for frame_idx in range(min_frame_idx, max_frame_idx + 1):
-            print("Frame %05d/%05d" % (frame_idx, max_frame_idx))
-            mask = frame_indices == frame_idx
-            rows = detections_in[mask]
-
-            if frame_idx not in image_filenames:
-                print("WARNING could not find image for frame %d" % frame_idx)
-                continue
-            bgr_image = cv2.imread(
-                image_filenames[frame_idx], cv2.IMREAD_COLOR)
-            features = encoder(bgr_image, rows[:, 2:6].copy())
-            detections_out += [np.r_[(row, feature)] for row, feature
-                               in zip(rows, features)]
-
-        output_filename = os.path.join(output_dir, "%s.npy" % sequence)
-        np.save(
-            output_filename, np.asarray(detections_out), allow_pickle=False)
-
-
-def parse_args():
-    """Parse command line arguments.
-    """
-    parser = argparse.ArgumentParser(description="Re-ID feature extractor")
-    parser.add_argument(
-        "--model",
-        default="resources/networks/mars-small128.pb",
-        help="Path to freezed inference graph protobuf.")
-    parser.add_argument(
-        "--mot_dir", help="Path to MOTChallenge directory (train or test)",
-        required=True)
-    parser.add_argument(
-        "--detection_dir", help="Path to custom detections. Defaults to "
-        "standard MOT detections Directory structure should be the default "
-        "MOTChallenge structure: [sequence]/det/det.txt", default=None)
-    parser.add_argument(
-        "--output_dir", help="Output directory. Will be created if it does not"
-        " exist.", default="detections")
-    return parser.parse_args()
-
-
-def main():
-    args = parse_args()
-    encoder = create_box_encoder(args.model, batch_size=32)
-    generate_detections(encoder, args.mot_dir, args.output_dir,
-                        args.detection_dir)
-
-
-if __name__ == "__main__":
-    main()
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "authorized-workshop",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "import errno\n",
+    "import argparse\n",
+    "import numpy as np\n",
+    "import cv2\n",
+    "import torch\n",
+    "import torch.nn as nn\n",
+    "import torchvision\n",
+    "import torchvision.datasets as datasets\n",
+    "import torchvision.transforms as transforms\n",
+    "import torchvision.transforms.functional as F\n",
+    "from torchvision import models"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "interior-isolation",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def _run_in_batches(f, data_dict, out, batch_size):\n",
+    "    data_len = len(out)\n",
+    "    num_batches = int(data_len / batch_size)\n",
+    "\n",
+    "    s, e = 0, 0\n",
+    "    for i in range(num_batches):\n",
+    "        s, e = i * batch_size, (i + 1) * batch_size\n",
+    "        batch_data_dict = {k: v[s:e] for k, v in data_dict.items()}\n",
+    "        out[s:e] = f(batch_data_dict)\n",
+    "    if e < len(out):\n",
+    "        batch_data_dict = {k: v[e:] for k, v in data_dict.items()}\n",
+    "        out[e:] = f(batch_data_dict)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "varied-difficulty",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def extract_image_patch(image, bbox, patch_shape):\n",
+    "    \"\"\"Extract image patch from bounding box.\n",
+    "\n",
+    "    Parameters\n",
+    "    ----------\n",
+    "    image : ndarray\n",
+    "        The full image.\n",
+    "    bbox : array_like\n",
+    "        The bounding box in format (x, y, width, height).\n",
+    "    patch_shape : Optional[array_like]\n",
+    "        This parameter can be used to enforce a desired patch shape\n",
+    "        (height, width). First, the `bbox` is adapted to the aspect ratio\n",
+    "        of the patch shape, then it is clipped at the image boundaries.\n",
+    "        If None, the shape is computed from :arg:`bbox`.\n",
+    "\n",
+    "    Returns\n",
+    "    -------\n",
+    "    ndarray | NoneType\n",
+    "        An image patch showing the :arg:`bbox`, optionally reshaped to\n",
+    "        :arg:`patch_shape`.\n",
+    "        Returns None if the bounding box is empty or fully outside of the image\n",
+    "        boundaries.\n",
+    "\n",
+    "    \"\"\"\n",
+    "    bbox = np.array(bbox)\n",
+    "    if patch_shape is not None:\n",
+    "        # correct aspect ratio to patch shape\n",
+    "        target_aspect = float(patch_shape[1]) / patch_shape[0]\n",
+    "        new_width = target_aspect * bbox[3]\n",
+    "        bbox[0] -= (new_width - bbox[2]) / 2\n",
+    "        bbox[2] = new_width\n",
+    "\n",
+    "    # convert to top left, bottom right\n",
+    "    bbox[2:] += bbox[:2]\n",
+    "    bbox = bbox.astype(np.int)\n",
+    "\n",
+    "    # clip at image boundaries\n",
+    "    bbox[:2] = np.maximum(0, bbox[:2])\n",
+    "    bbox[2:] = np.minimum(np.asarray(image.shape[:2][::-1]) - 1, bbox[2:])\n",
+    "    if np.any(bbox[:2] >= bbox[2:]):\n",
+    "        return None\n",
+    "    sx, sy, ex, ey = bbox\n",
+    "    image = image[sy:ey, sx:ex]\n",
+    "    image = cv2.resize(image, tuple(patch_shape[::-1]))\n",
+    "    return image"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "other-wrapping",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "class ImageEncoder(object):\n",
+    "\n",
+    "    def normalize_bbox(image):\n",
+    "        transform = transforms.Compose([\n",
+    "            transforms.Resize(256),\n",
+    "            transforms.ToTensor(),\n",
+    "            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])\n",
+    "            ])\n",
+    "        image_trans = transform(image)\n",
+    "        image_trans = bbox.unsqueeze(0)\n",
+    "        return image_trans\n",
+    "    \n",
+    "    def RESNET50(image_trans):\n",
+    "        cnn = torchvision.models.resnet50(pretrained=True)\n",
+    "        cnn = torch.nn.Sequential(*(list(cnn.children())[:-1]))\n",
+    "        out = cnn(image_trans)\n",
+    "        out.view(2048)\n",
+    "        return out"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "id": "desirable-newsletter",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def create_box_encoder(model_filename, input_name=\"images\",\n",
+    "                       output_name=\"features\", batch_size=32):\n",
+    "    image_encoder = ImageEncoder(model_filename, input_name, output_name)\n",
+    "    image_shape = image_encoder.image_shape\n",
+    "\n",
+    "    def encoder(image, boxes):\n",
+    "        image_patches = []\n",
+    "        for box in boxes:\n",
+    "            patch = extract_image_patch(image, box, image_shape[:2])\n",
+    "            if patch is None:\n",
+    "                print(\"WARNING: Failed to extract image patch: %s.\" % str(box))\n",
+    "                patch = np.random.uniform(\n",
+    "                    0., 255., image_shape).astype(np.uint8)\n",
+    "            image_patches.append(patch)\n",
+    "        image_patches = np.asarray(image_patches)\n",
+    "        return image_encoder(image_patches, batch_size)\n",
+    "\n",
+    "    return encoder"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "id": "universal-latter",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def generate_detections(encoder, mot_dir, output_dir, detection_dir=None):\n",
+    "    \"\"\"Generate detections with features.\n",
+    "    Parameters\n",
+    "    ----------\n",
+    "    encoder : Callable[image, ndarray] -> ndarray\n",
+    "        The encoder function takes as input a BGR color image and a matrix of\n",
+    "        bounding boxes in format `(x, y, w, h)` and returns a matrix of\n",
+    "        corresponding feature vectors.\n",
+    "    mot_dir : str\n",
+    "        Path to the MOTChallenge directory (can be either train or test).\n",
+    "    output_dir\n",
+    "        Path to the output directory. Will be created if it does not exist.\n",
+    "    detection_dir\n",
+    "        Path to custom detections. The directory structure should be the default\n",
+    "        MOTChallenge structure: `[sequence]/det/det.txt`. If None, uses the\n",
+    "        standard MOTChallenge detections.\n",
+    "\n",
+    "    \"\"\"\n",
+    "    if detection_dir is None:\n",
+    "        detection_dir = mot_dir\n",
+    "    try:\n",
+    "        os.makedirs(output_dir)\n",
+    "    except OSError as exception:\n",
+    "        if exception.errno == errno.EEXIST and os.path.isdir(output_dir):\n",
+    "            pass\n",
+    "        else:\n",
+    "            raise ValueError(\n",
+    "                \"Failed to created output directory '%s'\" % output_dir)\n",
+    "\n",
+    "    for sequence in os.listdir(mot_dir):\n",
+    "        print(\"Processing %s\" % sequence)\n",
+    "        sequence_dir = os.path.join(mot_dir, sequence)\n",
+    "\n",
+    "        image_dir = os.path.join(sequence_dir, \"img1\")\n",
+    "        image_filenames = {\n",
+    "            int(os.path.splitext(f)[0]): os.path.join(image_dir, f)\n",
+    "            for f in os.listdir(image_dir)}\n",
+    "\n",
+    "        detection_file = os.path.join(\n",
+    "            detection_dir, sequence, \"det/det.txt\")\n",
+    "        detections_in = np.loadtxt(detection_file, delimiter=',')\n",
+    "        detections_out = []\n",
+    "\n",
+    "        frame_indices = detections_in[:, 0].astype(np.int)\n",
+    "        min_frame_idx = frame_indices.astype(np.int).min()\n",
+    "        max_frame_idx = frame_indices.astype(np.int).max()\n",
+    "        for frame_idx in range(min_frame_idx, max_frame_idx + 1):\n",
+    "            print(\"Frame %05d/%05d\" % (frame_idx, max_frame_idx))\n",
+    "            mask = frame_indices == frame_idx\n",
+    "            rows = detections_in[mask]\n",
+    "\n",
+    "            if frame_idx not in image_filenames:\n",
+    "                print(\"WARNING could not find image for frame %d\" % frame_idx)\n",
+    "                continue\n",
+    "            bgr_image = cv2.imread(\n",
+    "                image_filenames[frame_idx], cv2.IMREAD_COLOR)\n",
+    "            features = encoder(bgr_image, rows[:, 2:6].copy())\n",
+    "            detections_out += [np.r_[(row, feature)] for row, feature\n",
+    "                               in zip(rows, features)]\n",
+    "\n",
+    "        output_filename = os.path.join(output_dir, \"%s.npy\" % sequence)\n",
+    "        np.save(\n",
+    "            output_filename, np.asarray(detections_out), allow_pickle=False)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "id": "photographic-strand",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def parse_args():\n",
+    "    \"\"\"Parse command line arguments.\n",
+    "    \"\"\"\n",
+    "    parser = argparse.ArgumentParser(description=\"Re-ID feature extractor\")\n",
+    "    parser.add_argument(\n",
+    "        \"--model\",\n",
+    "        default=\"resources/networks/mars-small128.pb\",\n",
+    "        help=\"Path to freezed inference graph protobuf.\")\n",
+    "    parser.add_argument(\n",
+    "        \"--mot_dir\", help=\"Path to MOTChallenge directory (train or test)\",\n",
+    "        required=True)\n",
+    "    parser.add_argument(\n",
+    "        \"--detection_dir\", help=\"Path to custom detections. Defaults to \"\n",
+    "        \"standard MOT detections Directory structure should be the default \"\n",
+    "        \"MOTChallenge structure: [sequence]/det/det.txt\", default=None)\n",
+    "    parser.add_argument(\n",
+    "        \"--output_dir\", help=\"Output directory. Will be created if it does not\"\n",
+    "        \" exist.\", default=\"detections\")\n",
+    "    return parser.parse_args()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "id": "golden-payment",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "usage: ipykernel_launcher.py [-h] [--model MODEL] --mot_dir MOT_DIR\n",
+      "                             [--detection_dir DETECTION_DIR]\n",
+      "                             [--output_dir OUTPUT_DIR]\n",
+      "ipykernel_launcher.py: error: the following arguments are required: --mot_dir\n"
+     ]
+    },
+    {
+     "ename": "SystemExit",
+     "evalue": "2",
+     "output_type": "error",
+     "traceback": [
+      "An exception has occurred, use %tb to see the full traceback.\n",
+      "\u001b[0;31mSystemExit\u001b[0m\u001b[0;31m:\u001b[0m 2\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/ga27qef/thesis/code/deep_sort/venv/lib/python3.7/site-packages/IPython/core/interactiveshell.py:3426: UserWarning: To exit: use 'exit', 'quit', or Ctrl-D.\n",
+      "  warn(\"To exit: use 'exit', 'quit', or Ctrl-D.\", stacklevel=1)\n"
+     ]
+    }
+   ],
+   "source": [
+    "def main():\n",
+    "    args = parse_args()\n",
+    "    encoder = create_box_encoder(args.model, batch_size=32)\n",
+    "    generate_detections(encoder, args.mot_dir, args.output_dir,\n",
+    "                        args.detection_dir)\n",
+    "\n",
+    "\n",
+    "if __name__ == \"__main__\":\n",
+    "    main()"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.7.5"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}

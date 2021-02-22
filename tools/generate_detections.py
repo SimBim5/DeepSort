@@ -73,42 +73,39 @@ def extract_image_patch(image, bbox, patch_shape):
     return image
 
 
-class ImageEncoder(object):
+def normalize_bbox(image):
+    transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    image_trans = transform(image)
+    image_trans = bbox.unsqueeze(0)
+    return image_trans
 
-    def normalize_bbox(image):
-        transform = transforms.Compose([
-            transforms.Resize(256),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            ])
-        image_trans = transform(image)
-        image_trans = bbox.unsqueeze(0)
-        return image_trans
-    
-    def RESNET50(image_trans):
-        cnn = torchvision.models.resnet50(pretrained=True)
-        cnn = torch.nn.Sequential(*(list(cnn.children())[:-1]))
-        out = cnn(image_trans)
-        out.view(2048)
-        return out
+
+def RESNET50(image_trans):
+    cnn = torchvision.models.resnet50(pretrained=True)
+    cnn = torch.nn.Sequential(*(list(cnn.children())[:-1]))
+    out = cnn(image_trans)
+    out.view(2048)
+    return out
     
     
 def create_box_encoder(model_filename, input_name="images",
                        output_name="features", batch_size=32):
-    image_encoder = ImageEncoder(model_filename, input_name, output_name)
-    image_shape = image_encoder.image_shape
 
     def encoder(image, boxes):
         image_patches = []
         for box in boxes:
-            patch = extract_image_patch(image, box, image_shape[:2])
+            patch = extract_image_patch(image, box, None)
             if patch is None:
                 print("WARNING: Failed to extract image patch: %s." % str(box))
                 patch = np.random.uniform(
                     0., 255., image_shape).astype(np.uint8)
             image_patches.append(patch)
         image_patches = np.asarray(image_patches)
-        return image_encoder(image_patches, batch_size)
+        return [RESNET50(normalize_bbox(image)) for image in image_patches]
     return encoder
 
 

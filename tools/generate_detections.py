@@ -10,6 +10,8 @@ import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
 from torchvision import models
+
+
 def _run_in_batches(f, data_dict, out, batch_size):
     data_len = len(out)
     num_batches = int(data_len / batch_size)
@@ -22,6 +24,8 @@ def _run_in_batches(f, data_dict, out, batch_size):
     if e < len(out):
         batch_data_dict = {k: v[e:] for k, v in data_dict.items()}
         out[e:] = f(batch_data_dict)
+        
+        
 def extract_image_patch(image, bbox, patch_shape):
     """Extract image patch from bounding box.
 
@@ -67,6 +71,8 @@ def extract_image_patch(image, bbox, patch_shape):
     image = image[sy:ey, sx:ex]
     image = cv2.resize(image, tuple(patch_shape[::-1]))
     return image
+
+
 class ImageEncoder(object):
 
     def normalize_bbox(image):
@@ -85,6 +91,8 @@ class ImageEncoder(object):
         out = cnn(image_trans)
         out.view(2048)
         return out
+    
+    
 def create_box_encoder(model_filename, input_name="images",
                        output_name="features", batch_size=32):
     image_encoder = ImageEncoder(model_filename, input_name, output_name)
@@ -101,8 +109,9 @@ def create_box_encoder(model_filename, input_name="images",
             image_patches.append(patch)
         image_patches = np.asarray(image_patches)
         return image_encoder(image_patches, batch_size)
-
     return encoder
+
+
 def generate_detections(encoder, mot_dir, output_dir, detection_dir=None):
     """Generate detections with features.
     Parameters
@@ -166,6 +175,8 @@ def generate_detections(encoder, mot_dir, output_dir, detection_dir=None):
         output_filename = os.path.join(output_dir, "%s.npy" % sequence)
         np.save(
             output_filename, np.asarray(detections_out), allow_pickle=False)
+        
+        
 def parse_args():
     """Parse command line arguments.
     """
@@ -185,6 +196,8 @@ def parse_args():
         "--output_dir", help="Output directory. Will be created if it does not"
         " exist.", default="detections")
     return parser.parse_args()
+
+
 def main():
     args = parse_args()
     encoder = create_box_encoder(args.model, batch_size=32)

@@ -31,8 +31,11 @@ class Detection(object):
         self.confidence = float(confidence)
         ##old: self.feature = np.asarray(feature, dtype=np.float32)
         ##Made By Simon:
-        self.feature = feature.detach().numpy()
-
+        ##self.feature = feature.detach().numpy()
+        with torch.no_grad():
+            self.feature = np.asarray(feature, dtype=np.float32)
+        
+        
     def to_tlbr(self):
         """Convert bounding box to format `(min x, min y, max x, max y)`, i.e.,
         `(top left, bottom right)`.

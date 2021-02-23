@@ -32,8 +32,7 @@ class Detection(object):
         ##old: self.feature = np.asarray(feature, dtype=np.float32)
         ##Made By Simon:
         ##self.feature = feature.detach().numpy()
-        with torch.no_grad():
-            self.feature = np.asarray(feature, dtype=np.float32)
+        self.feature = np.asarray(feature, dtype=np.float32)
         
         
     def to_tlbr(self):

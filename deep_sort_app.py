@@ -7,6 +7,7 @@ import os
 import cv2
 import numpy as np
 
+
 from application_util import preprocessing
 from application_util import visualization
 from deep_sort import nn_matching

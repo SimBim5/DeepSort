@@ -86,10 +86,11 @@ def normalize_bbox(image):
 
 
 def RESNET50(image_trans):
-    cnn = torchvision.models.resnet50(pretrained=True)
-    cnn = torch.nn.Sequential(*(list(cnn.children())[:-1]))
-    out = cnn(image_trans)
-    out.view(2048)
+    with torch.no_grad(): 
+        cnn = torchvision.models.resnet50(pretrained=True)
+        cnn = torch.nn.Sequential(*(list(cnn.children())[:-1]))
+        out = cnn(image_trans)
+        out.view(2048)
     return out
     
     

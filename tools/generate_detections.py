@@ -75,7 +75,7 @@ def extract_image_patch(image, bbox, patch_shape):
     return image
 
 
-def normalize_bbox(image_patches):                    ##Kommen die image_patches hier rein, wenn ich die einfach bei encoder returne?
+def normalize_bbox(image_patches):
     image_trans_list = []
     for image in image_patches:
         transform = transforms.Compose([
@@ -83,10 +83,9 @@ def normalize_bbox(image_patches):                    ##Kommen die image_patches
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
             ])
         image_trans = transform(image)
-        image_trans = image_trans.unsqueeze(0)
         image_trans_list.append(image_trans)
-    image_trans_tensor = torch.tensor(image_trans_list)
-    return [RESNET50(image_trans_tensor)]
+    image_trans_tensor = torch.stack(image_trans_list)
+    return RESNET50(image_trans_tensor)
 
 
 def RESNET50(image_trans):
@@ -94,7 +93,7 @@ def RESNET50(image_trans):
         cnn = torchvision.models.resnet50(pretrained=True)
         cnn = torch.nn.Sequential(*(list(cnn.children())[:-1]))
         out = cnn(image_trans)
-        out.view(2048)
+        out.view(out.size(0),2048)
     return out
     
     
@@ -111,7 +110,7 @@ def create_box_encoder(model_filename, input_name="images",
                     0., 255., image_shape).astype(np.uint8)
             image_patches.append(patch)
         image_patches = np.asarray(image_patches)
-        return image_patches
+        normalized_patches = normalize_bbox(image_patches).numpy()
     return encoder
 
 

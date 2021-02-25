@@ -29,9 +29,6 @@ class Detection(object):
     def __init__(self, tlwh, confidence, feature):
         self.tlwh = np.asarray(tlwh, dtype=np.float)
         self.confidence = float(confidence)
-        ##old: self.feature = np.asarray(feature, dtype=np.float32)
-        ##Made By Simon:
-        ##self.feature = feature.detach().numpy()
         self.feature = np.asarray(feature, dtype=np.float32)
         
         

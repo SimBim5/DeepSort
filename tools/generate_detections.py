@@ -94,6 +94,7 @@ def RESNET50(image_trans):
         cnn = torch.nn.Sequential(*(list(cnn.children())[:-1]))
         out = cnn(image_trans)
         out.view(out.size(0),2048)
+    ##print (out) -> ist nicht None
     return out
     
     
@@ -111,6 +112,7 @@ def create_box_encoder(model_filename, input_name="images",
             image_patches.append(patch)
         image_patches = np.asarray(image_patches)
         normalized_patches = normalize_bbox(image_patches).numpy()
+        ##print(normalized_patches)     -> nicht None 
     return encoder
 
 

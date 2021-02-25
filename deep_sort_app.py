@@ -161,6 +161,7 @@ def create_detections_online(detection_mat, frame_idx, image, encoder, min_heigh
     detection_list = []
     rows = detection_mat[mask]
     features = encoder(image, rows[:, 2:6].copy())
+    ##print(features)     -> NONE !!!
     for idx, row in enumerate(detection_mat[mask]):
         bbox, confidence = row[2:6], row[6]
         if bbox[3] < min_height:

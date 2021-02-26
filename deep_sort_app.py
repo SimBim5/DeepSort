@@ -293,7 +293,7 @@ def run_online(sequence_dir, detection_file, output_file, min_confidence,
         "cosine", max_cosine_distance, nn_budget)
     tracker = Tracker(metric)
     results = []
-    encoder = create_box_encoder(model, batch_size=32)
+    encoder = create_box_encoder()
 
     def frame_callback(vis, frame_idx):
         print("Processing frame %05d" % frame_idx)

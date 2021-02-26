@@ -26,8 +26,8 @@ def _run_in_batches(f, data_dict, out, batch_size):
     if e < len(out):
         batch_data_dict = {k: v[e:] for k, v in data_dict.items()}
         out[e:] = f(batch_data_dict)
-        
-        
+
+
 def extract_image_patch(image, bbox, patch_shape):
     """Extract image patch from bounding box.
 
@@ -81,7 +81,7 @@ def normalize_bbox(image_patches):
         transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            ])
+        ])
         image_trans = transform(image)
         image_trans_list.append(image_trans)
     image_trans_tensor = torch.stack(image_trans_list)
@@ -93,26 +93,24 @@ def RESNET50(image_trans):
         cnn = torchvision.models.resnet50(pretrained=True)
         cnn = torch.nn.Sequential(*(list(cnn.children())[:-1]))
         out = cnn(image_trans)
-        out.view(out.size(0),2048)
-    ##print (out) -> ist nicht None
+        out = out.view(out.size(0), 2048)
     return out
-    
-    
-def create_box_encoder(model_filename, input_name="images",
-                       output_name="features", batch_size=32):
 
+
+def create_box_encoder():
     def encoder(image, boxes):
         image_patches = []
         for box in boxes:
-            patch = extract_image_patch(image, box, [256,256])
+            patch = extract_image_patch(image, box, [256, 256])
             if patch is None:
                 print("WARNING: Failed to extract image patch: %s." % str(box))
                 patch = np.random.uniform(
-                    0., 255., image_shape).astype(np.uint8)
+                    0., 255., 256).astype(np.uint8)
             image_patches.append(patch)
         image_patches = np.asarray(image_patches)
         normalized_patches = normalize_bbox(image_patches).numpy()
-        ##print(normalized_patches)     -> nicht None 
+        print(normalized_patches.shape)
+        return normalized_patches
     return encoder
 
 
@@ -179,8 +177,8 @@ def generate_detections(encoder, mot_dir, output_dir, detection_dir=None):
         output_filename = os.path.join(output_dir, "%s.npy" % sequence)
         np.save(
             output_filename, np.asarray(detections_out), allow_pickle=False)
-        
-        
+
+
 def parse_args():
     """Parse command line arguments.
     """
@@ -194,11 +192,11 @@ def parse_args():
         required=True)
     parser.add_argument(
         "--detection_dir", help="Path to custom detections. Defaults to "
-        "standard MOT detections Directory structure should be the default "
-        "MOTChallenge structure: [sequence]/det/det.txt", default=None)
+                                "standard MOT detections Directory structure should be the default "
+                                "MOTChallenge structure: [sequence]/det/det.txt", default=None)
     parser.add_argument(
         "--output_dir", help="Output directory. Will be created if it does not"
-        " exist.", default="detections")
+                             " exist.", default="detections")
     return parser.parse_args()
 
 

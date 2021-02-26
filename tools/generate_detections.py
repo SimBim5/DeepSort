@@ -89,11 +89,13 @@ def normalize_bbox(image_patches):
 
 
 def RESNET50(image_trans):
+    cnn = torchvision.models.resnet50(pretrained=True)
+    cnn = torch.nn.Sequential(*(list(cnn.children())[:-1]))
+    cnn.eval().cuda()
+    image_trans = image_trans.cuda()
     with torch.no_grad():
-        cnn = torchvision.models.resnet50(pretrained=True)
-        cnn = torch.nn.Sequential(*(list(cnn.children())[:-1]))
         out = cnn(image_trans)
-        out = out.view(out.size(0), 2048)
+    out = out.view(out.size(0), 2048)
     return out
 
 
@@ -108,8 +110,8 @@ def create_box_encoder():
                     0., 255., 256).astype(np.uint8)
             image_patches.append(patch)
         image_patches = np.asarray(image_patches)
-        normalized_patches = normalize_bbox(image_patches).numpy()
-        print(normalized_patches.shape)
+        normalized_patches = normalize_bbox(image_patches)
+        normalized_patches = normalized_patches.cpu()
         return normalized_patches
     return encoder
 

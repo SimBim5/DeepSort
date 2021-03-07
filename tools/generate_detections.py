@@ -89,8 +89,11 @@ def normalize_bbox(image_patches):
 
 
 def RESNET50(image_trans):
-    cnn = torchvision.models.resnet50(pretrained=True)
+    cnn = torchvision.models.resnet50(pretrained=False)
     cnn = torch.nn.Sequential(*(list(cnn.children())[:-1]))
+    
+    cnn.load_state_dict(torch.load('/home/ga27qef/thesis/resnet_market.pth'))
+    
     cnn.eval().cuda()
     image_trans = image_trans.cuda()
     with torch.no_grad():

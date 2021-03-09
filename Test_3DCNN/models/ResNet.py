@@ -9,10 +9,9 @@ from torch.nn import init
 from torch.autograd import Variable
 from torch.nn import functional as F
 
-##from models import inflate
-##from models import AP3D
-##from models import NonLocal
-
+from models import NonLocal
+from models import AP3D
+from models import inflate
 
 __all__ = ['AP3DResNet50', 'AP3DNLResNet50']
 

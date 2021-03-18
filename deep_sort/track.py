@@ -37,9 +37,6 @@ class Track:
     max_age : int
         The maximum number of consecutive misses before the track state is
         set to `Deleted`.
-    feature : Optional[ndarray]
-        Feature vector of the detection this track originates from. If not None,
-        this feature is added to the `features` cache.
 
     Attributes
     ----------
@@ -63,8 +60,7 @@ class Track:
 
     """
 
-    def __init__(self, mean, covariance, track_id, n_init, max_age,
-                 feature=None):
+    def __init__(self, mean, covariance, track_id, n_init, max_age, bbox_image=None):
         self.mean = mean
         self.covariance = covariance
         self.track_id = track_id
@@ -73,12 +69,19 @@ class Track:
         self.time_since_update = 0
 
         self.state = TrackState.Tentative
-        self.features = []
-        if feature is not None:
-            self.features.append(feature)
+
+        self._last_images = []
+        if bbox_image is not None:
+            self._last_images.append(bbox_image)
 
         self._n_init = n_init
         self._max_age = max_age
+
+    @property
+    def last_images(self):
+        if len(self._last_images) > 4:
+            self._last_images = self._last_images[-4:]
+        return self._last_images
 
     def to_tlwh(self):
         """Get current position in bounding box format `(top left x, top left y,
@@ -137,7 +140,7 @@ class Track:
         """
         self.mean, self.covariance = kf.update(
             self.mean, self.covariance, detection.to_xyah())
-        self.features.append(detection.feature)
+        self._last_images.append(detection.bbox_image)
 
         self.hits += 1
         self.time_since_update = 0

@@ -5,6 +5,7 @@ from . import kalman_filter
 from . import linear_assignment
 from . import iou_matching
 from .track import Track
+from tools.generate_detections import create_box_encoder
 
 
 class Tracker:
@@ -37,7 +38,7 @@ class Tracker:
 
     """
 
-    def __init__(self, metric, max_iou_distance=0.7, max_age=30, n_init=3):
+    def __init__(self, metric, encoder, max_iou_distance=0.7, max_age=30, n_init=3):
         self.metric = metric
         self.max_iou_distance = max_iou_distance
         self.max_age = max_age
@@ -46,6 +47,7 @@ class Tracker:
         self.kf = kalman_filter.KalmanFilter()
         self.tracks = []
         self._next_id = 1
+        self.encoder = encoder
 
     def predict(self):
         """Propagate track state distributions one time step forward.
@@ -84,16 +86,16 @@ class Tracker:
         for track in self.tracks:
             if not track.is_confirmed():
                 continue
-            features += track.features
-            targets += [track.track_id for _ in track.features]
-            track.features = []
+            features.append(self.encoder.encode(track.last_images))
+            targets.append(track.track_id)
         self.metric.partial_fit(
             np.asarray(features), np.asarray(targets), active_targets)
 
     def _match(self, detections):
 
         def gated_metric(tracks, dets, track_indices, detection_indices):
-            features = np.array([dets[i].feature for i in detection_indices])
+
+            features = np.array([self.encoder.encode([dets[i].bbox_image]) for i in detection_indices])
             targets = np.array([tracks[i].track_id for i in track_indices])
             cost_matrix = self.metric.distance(features, targets)
             cost_matrix = linear_assignment.gate_cost_matrix(
@@ -134,5 +136,5 @@ class Tracker:
         mean, covariance = self.kf.initiate(detection.to_xyah())
         self.tracks.append(Track(
             mean, covariance, self._next_id, self.n_init, self.max_age,
-            detection.feature))
+            detection.bbox_image))
         self._next_id += 1

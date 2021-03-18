@@ -13,6 +13,9 @@ import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
 from torchvision import models
 
+from deep_sort.models.ResNet import AP3DResNet50
+import deep_sort.models.transforms as ST
+
 
 def _run_in_batches(f, data_dict, out, batch_size):
     data_len = len(out)
@@ -28,7 +31,7 @@ def _run_in_batches(f, data_dict, out, batch_size):
         out[e:] = f(batch_data_dict)
 
 
-def extract_image_patch(image, bbox, patch_shape):
+def extract_image_patch(image, bbox, patch_shape=None):
     """Extract image patch from bounding box.
 
     Parameters
@@ -71,52 +74,113 @@ def extract_image_patch(image, bbox, patch_shape):
         return None
     sx, sy, ex, ey = bbox
     image = image[sy:ey, sx:ex]
-    image = cv2.resize(image, tuple(patch_shape[::-1]))
+    if patch_shape is not None:
+        image = cv2.resize(image, tuple(patch_shape[::-1]))
     return image
 
 
-def normalize_bbox(image_patches):
-    image_trans_list = []
-    for image in image_patches:
-        transform = transforms.Compose([
+class ResNet50Encoder:
+
+    def __init__(self, pretrained_path=None):
+        self.cnn = torchvision.models.resnet50(pretrained=True)
+        self.cnn = torch.nn.Sequential(*(list(self.cnn.children())[:-1]))
+        if pretrained_path is not None:
+            print("Loading ResNet50Encoder from checkpoint %s" % pretrained_path)
+            self.cnn.load_state_dict(torch.load(pretrained_path))
+        self.cnn.eval().cuda()
+        self.transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
-        image_trans = transform(image)
-        image_trans_list.append(image_trans)
-    image_trans_tensor = torch.stack(image_trans_list)
-    return RESNET50(image_trans_tensor)
+
+    def encode(self, x):
+        with torch.no_grad():
+            # use only the last available image
+            x = x[-1]
+            # apply image transform
+            x = self.transform(x)
+            # add batch dimension
+            x = x.unsqueeze(dim=0)
+            # copy tensor to gpu
+            x = x.cuda()
+            # forward image through backbone
+            x = self.cnn(x)
+            x = x.view(2048).cpu().numpy()
+            return x
 
 
-def RESNET50(image_trans):
-    cnn = torchvision.models.resnet50(pretrained=False)
-    cnn = torch.nn.Sequential(*(list(cnn.children())[:-1]))
-    
-    cnn.load_state_dict(torch.load('/home/ga27qef/thesis/resnet_market.pth'))
-    
-    cnn.eval().cuda()
-    image_trans = image_trans.cuda()
-    with torch.no_grad():
-        out = cnn(image_trans)
-    out = out.view(out.size(0), 2048)
-    return out
+class ResNet50AverageEncoder:
+
+    def __init__(self, pretrained_path=None):
+        self.cnn = torchvision.models.resnet50(pretrained=True)
+        self.cnn = torch.nn.Sequential(*(list(self.cnn.children())[:-1]))
+        if pretrained_path is not None:
+            print("Loading ResNet50AverageEncoder from checkpoint %s" % pretrained_path)
+            self.cnn.load_state_dict(torch.load(pretrained_path))
+        self.cnn.eval().cuda()
+        self.transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            transforms.Resize((190, 50))
+        ])
+
+    def encode(self, x):
+        with torch.no_grad():
+            # apply image transform
+            x = torch.stack([self.transform(y) for y in x])
+            # copy tensor to gpu
+            x = x.cuda()
+            # forward image through backbone
+            x = self.cnn(x)
+            x = x.view(x.size(0), 2048)
+            x = torch.mean(x, dim=0).view(2048).cpu().numpy()
+            return x
 
 
-def create_box_encoder():
-    def encoder(image, boxes):
-        image_patches = []
-        for box in boxes:
-            patch = extract_image_patch(image, box, [256, 256])
-            if patch is None:
-                print("WARNING: Failed to extract image patch: %s." % str(box))
-                patch = np.random.uniform(
-                    0., 255., 256).astype(np.uint8)
-            image_patches.append(patch)
-        image_patches = np.asarray(image_patches)
-        normalized_patches = normalize_bbox(image_patches)
-        normalized_patches = normalized_patches.cpu()
-        return normalized_patches
-    return encoder
+class AP3DEncoder:
+
+    def __init__(self, pretrained_path=None):
+        self.model = AP3DResNet50(625)
+        self.transform = ST.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            transforms.Resize((256, 128), interpolation=3),
+        ])
+        if pretrained_path is not None:
+            print("Loading AP3DEncoder from checkpoint %s" % pretrained_path)
+            checkpoint = torch.load(pretrained_path)
+            self.model.load_state_dict(checkpoint['state_dict'])
+        self.model.eval().cuda()
+
+    def encode(self, x):
+        with torch.no_grad():
+            x = torch.stack([self.transform(y) for y in x][-3:])
+            if x.size(0) in [1, 2]:
+                x = torch.stack((3-(x.size(0)-1))*[x])
+                x = x.permute(1, 0, 2, 3, 4)
+                x = x.squeeze()
+            x = x.unsqueeze(dim=0)
+            x = x.cuda()
+            n, c, f, h, w = x.size()
+            assert(n == 1)
+            feat = self.model(x)
+            feat = feat.mean(1)
+            feat = self.model.bn(feat)
+            feat = feat.data.squeeze().cpu().numpy()
+            return feat
+
+
+def create_box_encoder(model='ResNet50', pretrained_path=None):
+    if model == 'ResNet50':
+        backbone_cls = ResNet50Encoder
+    elif model == "ResNet50Average":
+        backbone_cls = ResNet50AverageEncoder
+    elif model == 'AP3D':
+        backbone_cls = AP3DEncoder
+    else:
+        raise Exception('model not found...')
+    backbone = backbone_cls(pretrained_path=pretrained_path)
+    return backbone
 
 
 def generate_detections(encoder, mot_dir, output_dir, detection_dir=None):

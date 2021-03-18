@@ -13,7 +13,7 @@ from application_util import visualization
 from deep_sort import nn_matching
 from deep_sort.detection import Detection
 from deep_sort.tracker import Tracker
-from tools.generate_detections import create_box_encoder
+from tools.generate_detections import create_box_encoder, extract_image_patch
 
 
 def gather_sequence_info(sequence_dir, detection_file):
@@ -157,16 +157,13 @@ def create_detections_online(detection_mat, frame_idx, image, encoder, min_heigh
     """
     frame_indices = detection_mat[:, 0].astype(np.int)
     mask = frame_indices == frame_idx
-
     detection_list = []
-    rows = detection_mat[mask]
-    features = encoder(image, rows[:, 2:6].copy())
-    ##print(features)     -> NONE !!!
     for idx, row in enumerate(detection_mat[mask]):
         bbox, confidence = row[2:6], row[6]
+        bbox_image = extract_image_patch(image, bbox)
         if bbox[3] < min_height:
             continue
-        detection_list.append(Detection(bbox, confidence, features[idx]))
+        detection_list.append(Detection(bbox, confidence, bbox_image))
     return detection_list
 
 
@@ -258,7 +255,7 @@ def run(sequence_dir, detection_file, output_file, min_confidence,
 
 def run_online(sequence_dir, detection_file, output_file, min_confidence,
                nms_max_overlap, min_detection_height, max_cosine_distance,
-               nn_budget, display, model):
+               nn_budget, display, model, pretrained_path):
     """Run multi-target tracker on a particular sequence.
 
     Parameters
@@ -291,9 +288,10 @@ def run_online(sequence_dir, detection_file, output_file, min_confidence,
     seq_info = gather_sequence_info(sequence_dir, detection_file)
     metric = nn_matching.NearestNeighborDistanceMetric(
         "cosine", max_cosine_distance, nn_budget)
-    tracker = Tracker(metric)
+    print("Creating box encoder %s from path %s." % (model, pretrained_path))
+    encoder = create_box_encoder(model=model, pretrained_path=pretrained_path)
+    tracker = Tracker(metric, encoder)
     results = []
-    encoder = create_box_encoder()
 
     def frame_callback(vis, frame_idx):
         print("Processing frame %05d" % frame_idx)
@@ -394,6 +392,9 @@ def parse_args():
         "--online", help="Run tracker online",
         default=False, type=bool_string
     )
+    parser.add_argument(
+        "--pretrained_path", help="Path to pretrained model", default=None
+    )
     return parser.parse_args()
 
 
@@ -405,11 +406,7 @@ if __name__ == "__main__":
             args.sequence_dir, args.detection_file, args.output_file,
             args.min_confidence, args.nms_max_overlap, args.min_detection_height,
             args.max_cosine_distance, args.nn_budget, args.display,
-            args.model
+            args.model, args.pretrained_path
         )
     else:
-        run(
-            args.sequence_dir, args.detection_file, args.output_file,
-            args.min_confidence, args.nms_max_overlap, args.min_detection_height,
-            args.max_cosine_distance, args.nn_budget, args.display
-        )
+        print("Offline mode is no longer supported.")

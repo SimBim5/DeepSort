@@ -16,6 +16,9 @@ from torchvision import models
 from deep_sort.models.ResNet import AP3DResNet50
 import deep_sort.models.transforms as ST
 
+from deep_sort.models.ResNet_TKP import ImgResNet50
+from deep_sort.models.ResNet_TKP import VidNonLocalResNet50
+
 
 def _run_in_batches(f, data_dict, out, batch_size):
     data_len = len(out)
@@ -169,7 +172,18 @@ class AP3DEncoder:
             feat = feat.data.squeeze().cpu().numpy()
             return feat
 
-
+        
+class TKPEncoder:
+    
+    def __init__(self, pretrained_path=None):
+        self.model = ImgResNet50()
+        self.transform = ST.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            transforms.Resize((256, 128), interpolation=3),
+        ])
+        
+        
 def create_box_encoder(model='ResNet50', pretrained_path=None):
     if model == 'ResNet50':
         backbone_cls = ResNet50Encoder

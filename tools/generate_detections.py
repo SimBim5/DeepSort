@@ -191,6 +191,16 @@ class TKPEncoder:
         
     def encode(self, x):
         with torch.no_grad():
+            x = x.unsqueeze(dim=0)
+            x = x.cuda()
+            n, c, f, h, w = x.size()
+            assert(n == 1)
+            feat = self.model(x)
+            feat = feat.mean(1)
+            feat = self.model.bn(feat)
+            feat = feat.data.squeeze().cpu().numpy()
+            return feat
+        
         
 def create_box_encoder(model='ResNet50', pretrained_path=None):
     if model == 'ResNet50':

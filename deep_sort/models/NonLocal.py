@@ -124,3 +124,25 @@ class NonLocalBlock3D(NonLocalBlockND):
                                               inter_channels=inter_channels,
                                               dimension=3, sub_sample=sub_sample,
                                               bn_layer=bn_layer)
+        
+        
+## Wegen TKP eingefügt:
+if __name__ == '__main__':
+    from torch.autograd import Variable
+    import torch
+    sub_sample = False
+
+    img = Variable(torch.zeros(2, 4, 5))
+    net = NONLocalBlock1D(4, sub_sample=sub_sample, bn_layer=False)
+    out = net(img)
+    print(out.size())
+
+    img = Variable(torch.zeros(2, 3, 256, 128))
+    net = NONLocalBlock2D(3, sub_sample=sub_sample)
+    out = net(img)
+    print(out.size())
+
+    img = Variable(torch.zeros(2, 3, 8, 256, 128))
+    net = NONLocalBlock3D(3, sub_sample=sub_sample)
+    out = net(img)
+    print(out.size())

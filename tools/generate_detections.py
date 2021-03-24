@@ -16,6 +16,7 @@ from torchvision import models
 from deep_sort.models.ResNet import AP3DResNet50
 import deep_sort.models.transforms as ST
 
+##import TKP Networks:
 from deep_sort.models.ResNet_TKP import ImgResNet50
 from deep_sort.models.ResNet_TKP import VidNonLocalResNet50
 
@@ -182,7 +183,14 @@ class TKPEncoder:
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             transforms.Resize((256, 128), interpolation=3),
         ])
+        if pretrained_path is not None:
+            print("Loading ImgResNet50 from checkpoint %s" % pretrained_path)
+            checkpoint = torch.load(pretrained_path)
+            self.model.load_state_dict(checkpoint['state_dict'])
+        self.model.eval().cuda()
         
+    def encode(self, x):
+        with torch.no_grad():
         
 def create_box_encoder(model='ResNet50', pretrained_path=None):
     if model == 'ResNet50':

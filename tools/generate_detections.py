@@ -195,8 +195,8 @@ class TKPEncoder:
         with torch.no_grad():
             ##mind. 4 Bboxen zum Modell
             x = torch.stack([self.transform(y) for y in x][-4:])
-            ##falls 1,2,3,4 bboxen vorhanden sind:
-            if x.size(0) in [1, 2, 3, 4]:
+            ##falls 1,2,3 bboxen vorhanden sind:
+            if x.size(0) in [1, 2, 3]:
                 x = x.unsqueeze(dim=0)
                 x = x.cuda()
                 n, c, f, h, w = x.size()
@@ -206,7 +206,7 @@ class TKPEncoder:
                 feat = self.model.bn(feat)
                 feat = feat.data.squeeze().cpu().numpy()
             ##falls mind. 4 bboxen vorhanden sind:
-            elif x.size(0) > 4:
+            elif x.size(0) > 3:
                 x = x.unsqueeze(dim=0)
                 x = x.cuda()
                 n, c, f, h, w = x.size()

@@ -201,6 +201,7 @@ class TKPEncoder:
                 x = x.cuda()
                 n, c, f, h, w = x.size()
                 assert(n == 1)
+                x = x.squeeze()
                 feat = self.model(x)
                 feat = feat.mean(1)
                 feat = self.model.bn(feat)

@@ -9,7 +9,7 @@ from torch.nn import init
 from torch.autograd import Variable
 from torch.nn import functional as F
 
-from deep_sort.models import NonLocal
+from deep_sort.models import non_local
 from deep_sort.models import AP3D
 from deep_sort.models import inflate
 

@@ -175,14 +175,16 @@ class AP3DEncoder:
 
         
 class TKPEncoder:
-    
+    ##diesmal 2 Modelle laden: Image Repr. Net. & Video Repr. Net.
     def __init__(self, pretrained_path=None):
         self.model = ImgResNet50()
+        self.model2 = VidNonLocalResNet50
         self.transform = ST.Compose([
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             transforms.Resize((256, 128), interpolation=3),
         ])
+        ##eigentlich müssten hier beide Modells trainiert werden
         if pretrained_path is not None:
             print("Loading ImgResNet50 from checkpoint %s" % pretrained_path)
             checkpoint = torch.load(pretrained_path)
@@ -191,14 +193,28 @@ class TKPEncoder:
         
     def encode(self, x):
         with torch.no_grad():
-            x = x.unsqueeze(dim=0)
-            x = x.cuda()
-            n, c, f, h, w = x.size()
-            assert(n == 1)
-            feat = self.model(x)
-            feat = feat.mean(1)
-            feat = self.model.bn(feat)
-            feat = feat.data.squeeze().cpu().numpy()
+            ##mind. 4 Bboxen zum Modell
+            x = torch.stack([self.transform(y) for y in x][-4:])
+            ##falls 1,2,3,4 bboxen vorhanden sind:
+            if x.size(0) in [1, 2, 3, 4]:
+                x = x.unsqueeze(dim=0)
+                x = x.cuda()
+                n, c, f, h, w = x.size()
+                assert(n == 1)
+                feat = self.model(x)
+                feat = feat.mean(1)
+                feat = self.model.bn(feat)
+                feat = feat.data.squeeze().cpu().numpy()
+            ##falls mind. 4 bboxen vorhanden sind:
+            elif x.size(0) > 4:
+                x = x.unsqueeze(dim=0)
+                x = x.cuda()
+                n, c, f, h, w = x.size()
+                assert(n == 1)
+                feat = self.model2(x)
+                feat = feat.mean(1)
+                feat = self.model2.bn(feat)
+                feat = feat.data.squeeze().cpu().numpy()
             return feat
         
         
@@ -209,6 +225,8 @@ def create_box_encoder(model='ResNet50', pretrained_path=None):
         backbone_cls = ResNet50AverageEncoder
     elif model == 'AP3D':
         backbone_cls = AP3DEncoder
+    elif model == 'TKP':
+        backbone_cls = TKPEncoder
     else:
         raise Exception('model not found...')
     backbone = backbone_cls(pretrained_path=pretrained_path)

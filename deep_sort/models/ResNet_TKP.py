@@ -110,7 +110,7 @@ class VidNonLocalResNet50(nn.Module):
             reslayers3d.append(layer3d)
 
             if i in nonlocal_idx:
-                non_local_block = non_local.NONLocalBlock3D(nonlocal_channels, sub_sample=True)
+                non_local_block = non_local.NonLocalBlock3D(nonlocal_channels, sub_sample=True)
                 reslayers3d.append(non_local_block)
 
         return nn.Sequential(*reslayers3d)

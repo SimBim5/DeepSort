@@ -13,6 +13,7 @@ import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
 from torchvision import models
 
+##import AP3D 
 from deep_sort.models.ResNet import AP3DResNet50
 import deep_sort.models.transforms as ST
 
@@ -20,6 +21,7 @@ import deep_sort.models.transforms as ST
 from deep_sort.models.ResNet_TKP import ImgResNet50
 from deep_sort.models.ResNet_TKP import VidNonLocalResNet50
 
+from deep_sort.models.__init__ import init_model
 
 def _run_in_batches(f, data_dict, out, batch_size):
     data_len = len(out)
@@ -177,19 +179,24 @@ class AP3DEncoder:
 class TKPEncoder:
     ##diesmal 2 Modelle laden: Image Repr. Net. & Video Repr. Net.
     def __init__(self, pretrained_path=None):
-        self.model = ImgResNet50()
+        self.model1 = ImgResNet50()
         self.model2 = VidNonLocalResNet50()
         self.transform = ST.Compose([
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             transforms.Resize((256, 128), interpolation=3),
         ])
-        ##eigentlich müssten hier beide Modells trainiert werden
+        #laden von weights beider models 
         if pretrained_path is not None:
-            print("Loading ImgResNet50 from checkpoint %s" % pretrained_path)
+            print("Loading ImgResNet50 from checkpoint %s" % pretrained_path)                       
             checkpoint = torch.load(pretrained_path)
-            self.model.load_state_dict(checkpoint['state_dict'])
-        self.model.eval().cuda()
+            self.model1 = init_model(name='img_resnet50')
+            self.model1.load_state_dict(checkpoint['img_model_state_dict'])
+            self.model1.eval().cuda()
+            print("Loading VidNonLocalResNet50 from checkpoint %s" % pretrained_path)
+            self.model2 = init_model(name='vid_nonlocalresnet50') 
+            self.model2.load_state_dict(checkpoint['vid_model_state_dict'])
+            self.model2.eval().cuda()
         
     def encode(self, x):
         with torch.no_grad():
@@ -202,9 +209,10 @@ class TKPEncoder:
                 n, c, f, h, w = x.size()
                 assert(n == 1)
                 x = x.squeeze()
-                feat = self.model(x)
+                print(x.size())
+                feat = self.model1(x)
+                ##feat = self.model1.bn(feat)
                 feat = feat.mean(1)
-                feat = self.model.bn(feat)
                 feat = feat.data.squeeze().cpu().numpy()
             ##falls mind. 4 bboxen vorhanden sind:
             elif x.size(0) > 3:
@@ -212,9 +220,10 @@ class TKPEncoder:
                 x = x.cuda()
                 n, c, f, h, w = x.size()
                 assert(n == 1)
+                x = x.squeeze()
                 feat = self.model2(x)
                 feat = feat.mean(1)
-                feat = self.model2.bn(feat)
+                feat = self.model2.bn1(feat)
                 feat = feat.data.squeeze().cpu().numpy()
             return feat
         

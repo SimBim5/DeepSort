@@ -190,13 +190,13 @@ class TKPEncoder:
         if pretrained_path is not None:
             print("Loading ImgResNet50 from checkpoint %s" % pretrained_path)                       
             checkpoint = torch.load(pretrained_path)
-            self.model1.eval().cuda()
             self.model1 = init_model(name='img_resnet50')
             self.model1.load_state_dict(checkpoint['img_model_state_dict'])
+            self.model1.cuda()
             print("Loading VidNonLocalResNet50 from checkpoint %s" % pretrained_path)
-            self.model1.eval().cuda()
             self.model2 = init_model(name='vid_nonlocalresnet50') 
             self.model2.load_state_dict(checkpoint['vid_model_state_dict'])
+            self.model1.cuda()
 
         
     def encode(self, x):

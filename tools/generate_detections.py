@@ -23,6 +23,7 @@ from deep_sort.models.ResNet_TKP import VidNonLocalResNet50
 
 from deep_sort.models.__init__ import init_model
 
+
 def _run_in_batches(f, data_dict, out, batch_size):
     data_len = len(out)
     num_batches = int(data_len / batch_size)
@@ -162,20 +163,20 @@ class AP3DEncoder:
         with torch.no_grad():
             x = torch.stack([self.transform(y) for y in x][-3:])
             if x.size(0) in [1, 2]:
-                x = torch.stack((3-(x.size(0)-1))*[x])
+                x = torch.stack((3 - (x.size(0) - 1)) * [x])
                 x = x.permute(1, 0, 2, 3, 4)
                 x = x.squeeze()
             x = x.unsqueeze(dim=0)
             x = x.cuda()
             n, c, f, h, w = x.size()
-            assert(n == 1)
+            assert (n == 1)
             feat = self.model(x)
             feat = feat.mean(1)
             feat = self.model.bn(feat)
             feat = feat.data.squeeze().cpu().numpy()
             return feat
 
-        
+
 class TKPEncoder:
     ##diesmal 2 Modelle laden: Image Repr. Net. & Video Repr. Net.
     def __init__(self, pretrained_path=None):
@@ -186,47 +187,39 @@ class TKPEncoder:
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             transforms.Resize((256, 128), interpolation=3),
         ])
-        #laden von weights beider models 
+        # laden von weights beider models
         if pretrained_path is not None:
-            print("Loading ImgResNet50 from checkpoint %s" % pretrained_path)                       
+            print("Loading ImgResNet50 from checkpoint %s" % pretrained_path)
             checkpoint = torch.load(pretrained_path)
             self.model1 = init_model(name='img_resnet50')
             self.model1.load_state_dict(checkpoint['img_model_state_dict'])
             self.model1.eval().cuda()
             print("Loading VidNonLocalResNet50 from checkpoint %s" % pretrained_path)
-            self.model2 = init_model(name='vid_nonlocalresnet50') 
+            self.model2 = init_model(name='vid_nonlocalresnet50')
             self.model2.load_state_dict(checkpoint['vid_model_state_dict'])
             self.model2.eval().cuda()
 
-        
     def encode(self, x):
         with torch.no_grad():
-            x = torch.stack([self.transform(y) for y in x][-4:]) ##mind. 4 Bboxen zum Modell
-            if x.size(0) in [1, 2, 3]:##falls 1,2,3 bboxen vorhanden sind:
-                x = x.unsqueeze(dim=0)
-                n, c, f, h, w = x.size()
-                assert(n == 1)
-                x = x.permute(0, 2, 1, 3, 4)
-                print(x.size())
-                x = x.squeeze()
+            x = torch.stack([self.transform(y) for y in x][-4:])  ##mind. 4 Bboxen zum Modell
+            if x.size(0) in [1, 2, 3]:  ## falls 1, 2, 3 bboxen vorhanden sind:
+                x = x[0, :, :, :].unsqueeze(0)
                 x = x.cuda()
                 feat = self.model1(x)
-                feat = feat.mean(1)
                 feat = feat.data.squeeze().cpu().numpy()
-            elif x.size(0) > 3:##falls mind. 4 bboxen vorhanden sind:
+            elif x.size(0) > 3:  ##falls mind. 4 bboxen vorhanden sind:
                 x = x.unsqueeze(dim=0)
                 n, c, f, h, w = x.size()
-                assert(n == 1)
+                assert (n == 1)
                 x = x.permute(0, 2, 1, 3, 4)
-                #x = x.squeeze()
+                # x = x.squeeze()
                 x = x.cuda()
                 feat = self.model2(x)
                 feat = feat.mean(1)
-                feat = self.model2.bn1(feat)
                 feat = feat.data.squeeze().cpu().numpy()
             return feat
-        
-        
+
+
 def create_box_encoder(model='ResNet50', pretrained_path=None):
     if model == 'ResNet50':
         backbone_cls = ResNet50Encoder

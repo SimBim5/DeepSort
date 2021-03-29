@@ -192,30 +192,27 @@ class TKPEncoder:
             checkpoint = torch.load(pretrained_path)
             self.model1 = init_model(name='img_resnet50')
             self.model1.load_state_dict(checkpoint['img_model_state_dict'])
-            self.model1.cuda()
+            self.model1.eval().cuda()
             print("Loading VidNonLocalResNet50 from checkpoint %s" % pretrained_path)
             self.model2 = init_model(name='vid_nonlocalresnet50') 
             self.model2.load_state_dict(checkpoint['vid_model_state_dict'])
-            self.model1.cuda()
+            self.model2.eval().cuda()
 
         
     def encode(self, x):
         with torch.no_grad():
-            ##mind. 4 Bboxen zum Modell
-            x = torch.stack([self.transform(y) for y in x][-4:])
-            ##falls 1,2,3 bboxen vorhanden sind:
-            if x.size(0) in [1, 2, 3]:
+            x = torch.stack([self.transform(y) for y in x][-4:]) ##mind. 4 Bboxen zum Modell
+            if x.size(0) in [1, 2, 3]:##falls 1,2,3 bboxen vorhanden sind:
                 x = x.unsqueeze(dim=0)
                 n, c, f, h, w = x.size()
                 assert(n == 1)
                 x = x.squeeze()
-                print(x.size())
                 x = x.cuda()
+                print(x.size())
                 feat = self.model1(x)
                 feat = feat.mean(1)
                 feat = feat.data.squeeze().cpu().numpy()
-            ##falls mind. 4 bboxen vorhanden sind:
-            elif x.size(0) > 3:
+            elif x.size(0) > 3:##falls mind. 4 bboxen vorhanden sind:
                 x = x.unsqueeze(dim=0)
                 n, c, f, h, w = x.size()
                 assert(n == 1)
